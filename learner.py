@@ -1,7 +1,7 @@
 # coding=utf-8
 from dynet import *
 import dynet
-from utils import read_conll, write_conll
+from utils import read_conll, write_conll, soft_embed
 from operator import itemgetter
 import utils, time, random, decoder
 import numpy as np
@@ -25,7 +25,10 @@ class jPosDepLearner:
         self.ldims = options.lstm_dims
         self.wdims = options.wembedding_dims
         self.cdims = options.cembedding_dims
+        self.mdims = options.membedding_dims
+        self.pdims = options.pembedding_dims
         self.layers = options.lstm_layers
+
         self.wordsCount = vocab
         self.vocab = {word: ind+3 for word, ind in w2i.iteritems()}
         self.pos = {word: ind for ind, word in enumerate(pos)}
@@ -56,11 +59,13 @@ class jPosDepLearner:
             print 'Load external embedding. Vector dimensions', self.edim
 
         if self.bibiFlag:
-            self.builders = [VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model),
-                             VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model)]
+            self.builders = [VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.ldims, self.model),
+                             VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.ldims, self.model)]
+            # self.bbuilders = [VanillaLSTMBuilder(1, self.ldims * 2 + self.pdims, self.ldims, self.model),
+            #                   VanillaLSTMBuilder(1, self.ldims * 2 + self.pdims, self.ldims, self.model)]
             self.bbuilders = [VanillaLSTMBuilder(1, self.ldims * 2, self.ldims, self.model),
-                              VanillaLSTMBuilder(1, self.ldims * 2, self.ldims, self.model)]
-        elif self.layers > 0:
+                              VanillaLSTMBuilder(1, self.ldims * 2  , self.ldims, self.model)]
+        elif self.layers > 0:   
             self.builders = [VanillaLSTMBuilder(self.layers, self.wdims + self.edim, self.ldims, self.model),
                              VanillaLSTMBuilder(self.layers, self.wdims + self.edim, self.ldims, self.model)]
         else:
@@ -77,6 +82,9 @@ class jPosDepLearner:
 
         self.wlookup = self.model.add_lookup_parameters((len(vocab) + 3, self.wdims))
         self.clookup = self.model.add_lookup_parameters((len(c2i), self.cdims))
+        
+        self.mlookup = self.model.add_lookup_parameters((len(morphs), self.mdims))
+        self.plookup = self.model.add_lookup_parameters((len(pos), self.pdims))
 
         self.hidLayerFOH = self.model.add_parameters((self.hidden_units, self.ldims * 2))
         self.hidLayerFOM = self.model.add_parameters((self.hidden_units, self.ldims * 2))
@@ -159,6 +167,14 @@ class jPosDepLearner:
                     
                     last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in entry.idChars])[-1]
                     rev_last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in reversed(entry.idChars)])[-1]
+
+                    # char_state = dynet.noise(concatenate([last_state, rev_last_state]), 0.2)
+                    # morph_logit = self.charSeqPredictor.predict_sequence(char_state)
+                    # morphID = self.morphs.get(entry.feats)
+                    # morphErrs.append(self.pick_neg_log(morph_logit, morphID))
+                    # morph_emb = None
+                    # for i in morph_logit:
+                    #     morph_emb += i * self.mlookup(i)
                       
                     entry.vec = concatenate(filter(None, [wordvec, evec, last_state, rev_last_state]))
                     entry.ch_vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [last_state, rev_last_state])])
@@ -170,17 +186,22 @@ class jPosDepLearner:
                     entry.rmodfov = None
 
                 if self.blstmFlag:
+                    morph_emd = []
                     morcat_layer = [entry.ch_vec for entry in conll_sentence]
                     morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
                     predicted_morph_idx = [np.argmax(o.value()) for o in morph_logits]
                     predicted_morphs = [self.id2morph[idx] for idx in predicted_morph_idx]
 
+                    for pred in morph_logits:
+                        morph_emd.append(soft_embed(pred.value(), self.mlookup))
+
                     lstm_forward = self.builders[0].initial_state()
                     lstm_backward = self.builders[1].initial_state()
 
-                    for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
-                        lstm_forward = lstm_forward.add_input(entry.vec)
-                        lstm_backward = lstm_backward.add_input(rentry.vec)
+                    for entry, rentry, membed, revmembed in zip(conll_sentence, reversed(conll_sentence), 
+                                                                    morph_emd, reversed(morph_emd)):
+                        lstm_forward = lstm_forward.add_input(concatenate([entry.vec, membed]))
+                        lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, revmembed]))
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
@@ -281,7 +302,6 @@ class jPosDepLearner:
                     
                     last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in entry.idChars])[-1]
                     rev_last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in reversed(entry.idChars)])[-1]
-                    
 
                     # entry.vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [wordvec, evec, last_state, rev_last_state])])
                     entry.vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [wordvec, evec, last_state, rev_last_state])])
@@ -295,18 +315,20 @@ class jPosDepLearner:
 
                 if self.blstmFlag:
                     
+                    morph_emd = []
                     morcat_layer = [entry.ch_vec for entry in conll_sentence]
                     morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
                     morphIDs = [self.morphs.get(entry.feats) for entry in conll_sentence]
                     for pred, gold in zip(morph_logits, morphIDs):
                         morphErrs.append(self.pick_neg_log(pred, gold))
-
+                        morph_emd.append(soft_embed(pred.value(), self.mlookup))
                     lstm_forward = self.builders[0].initial_state()
                     lstm_backward = self.builders[1].initial_state()
 
-                    for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
-                        lstm_forward = lstm_forward.add_input(entry.vec)
-                        lstm_backward = lstm_backward.add_input(rentry.vec)
+                    for entry, rentry, membed, revmembed in zip(conll_sentence, reversed(conll_sentence), 
+                                                                    morph_emd, reversed(morph_emd)):
+                        lstm_forward = lstm_forward.add_input(concatenate([entry.vec, membed]))
+                        lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, revmembed]))
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
@@ -384,3 +406,10 @@ class jPosDepLearner:
 
         self.trainer.update()
         print "Loss: %.2f" % (mloss/iSentence)
+
+
+def soft_embed(vec, lookup):
+    embeds = []
+    for i, v in enumerate(vec):
+        embeds.append(v * lookup[i])
+    return esum(embeds)

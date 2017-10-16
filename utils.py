@@ -136,3 +136,9 @@ numberRegex = re.compile("[0-9]+|[0-9]+\\.[0-9]+|[0-9]+[0-9,]+");
 def normalize(word):
     return 'NUM' if numberRegex.match(word) else word.lower()
 
+
+def soft_embed(vec, lookup):
+    embeds = []
+    for i, v in enumerate(vec):
+        embeds.append(v * lookup[i])
+    return embeds
