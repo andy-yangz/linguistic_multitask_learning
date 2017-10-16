@@ -21,6 +21,7 @@ class ConllEntry:
         self.pred_parent_id = None
         self.pred_relation = None
         self.pred_pos = None
+        self.pred_feats = None
         
         self.idChars = []
 
@@ -33,6 +34,7 @@ def vocab(conll_path):
     wordsCount = Counter()
     posCount = Counter()
     relCount = Counter()
+    morphCount = Counter()
 
     #Character vocabulary
     c2i = {}
@@ -52,13 +54,16 @@ def vocab(conll_path):
                 wordsCount.update([node.norm for node in tokens if isinstance(node, ConllEntry)])
                 posCount.update([node.pos for node in tokens if isinstance(node, ConllEntry)])
                 relCount.update([node.relation for node in tokens if isinstance(node, ConllEntry)])
+                morphCount.update([node.feats for node in tokens if isinstance(node, ConllEntry)])
+                # for node in tokens:
+                #     if isinstance(node, ConllEntry):
+                #         morphCount.update(node.feats.split('|'))
             tokens = [root]
         else:
             if line[0] == '#' or '-' in tok[0] or '.' in tok[0]:
                 tokens.append(line.strip())
             else:
                 entry = ConllEntry(int(tok[0]), tok[1], tok[2], tok[3], tok[4], tok[5], int(tok[6]) if tok[6] != '_' else -1, tok[7], tok[8], tok[9])
-                
                 if entry.norm == 'NUM':
                     entry.idChars = [1,3,2]
                 else:    
@@ -71,14 +76,16 @@ def vocab(conll_path):
                     entry.idChars = chars_of_word
                 
                 tokens.append(entry)
-                
-                
+                     
     if len(tokens) > 1:
         wordsCount.update([node.norm for node in tokens if isinstance(node, ConllEntry)])
         posCount.update([node.pos for node in tokens if isinstance(node, ConllEntry)])
         relCount.update([node.relation for node in tokens if isinstance(node, ConllEntry)])
+        for node in tokens:
+            if isinstance(node, ConllEntry):
+                morphCount.update(node.feats)
     
-    return (wordsCount, {w: i for i, w in enumerate(wordsCount.keys())}, c2i, posCount.keys(), relCount.keys())
+    return (wordsCount, {w: i for i, w in enumerate(wordsCount.keys())}, c2i, posCount.keys(), relCount.keys(), morphCount.keys())
 
 
 def read_conll(fh,c2i):

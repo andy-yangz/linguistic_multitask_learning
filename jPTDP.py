@@ -14,6 +14,8 @@ if __name__ == '__main__':
     parser.add_option("--model", dest="model", help="Load/Save model file", metavar="FILE", default="model")
     parser.add_option("--wembedding", type="int", dest="wembedding_dims", default=128)
     parser.add_option("--cembedding", type="int", dest="cembedding_dims", default=64)
+    parser.add_option("--membedding", type="int", dest="morph embedding_dims", default=64)
+    parser.add_option("--pembedding", type="int", dest="pos embedding_dims", default=32)
     parser.add_option("--epochs", type="int", dest="epochs", default=30)
     parser.add_option("--hidden", type="int", dest="hidden_units", default=100)
     parser.add_option("--hidden2", type="int", dest="hidden2_units", default=0)
@@ -59,13 +61,13 @@ if __name__ == '__main__':
         #    os.system('python utils/evaluation_script/conll17_ud_eval.py -v -w utils/evaluation_script/weights.clas ' + options.conll_test + ' ' + tespath + ' > ' + tespath + '.scores.txt')
     else:
         print 'Extracting vocabulary'
-        words, w2i, c2i, pos, rels = utils.vocab(options.conll_train)
+        words, w2i, c2i, pos, rels, morphs = utils.vocab(options.conll_train)
         
         with open(os.path.join(options.output, options.params), 'w') as paramsfp:
-            pickle.dump((words, w2i, c2i, pos, rels, options), paramsfp)
+            pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
         
         print 'Initializing joint model'
-        parser = learner.jPosDepLearner(words, pos, rels, w2i, c2i, options)
+        parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, options)
         
         highestScore = 0.0
         eId = 0
@@ -82,6 +84,7 @@ if __name__ == '__main__':
                 count = 0
                 lasCount = 0
                 posCount = 0
+                morphCount = 0
                 poslasCount = 0
                 for idSent, devSent in enumerate(devPredSents):
                     conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
@@ -93,12 +96,15 @@ if __name__ == '__main__':
                             poslasCount += 1
                         if entry.pos == entry.pred_pos:
                             posCount += 1
+                        if entry.feats == entry.pred_feats:
+                            morphCount += 1
                         if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
                             lasCount += 1
                         count += 1
                         
                 print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
                 print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
+                print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
                 print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
                 
                 score = float(poslasCount) * 100 / count

@@ -9,7 +9,7 @@ from mnnl import FFSequencePredictor, Layer, RNNSequencePredictor, BiRNNSequence
 
 
 class jPosDepLearner:
-    def __init__(self, vocab, pos, rels, w2i, c2i, options):
+    def __init__(self, vocab, pos, rels, morphs, w2i, c2i, options):
         self.model = ParameterCollection()
         random.seed(1)
         self.trainer = AdamTrainer(self.model)
@@ -30,6 +30,8 @@ class jPosDepLearner:
         self.vocab = {word: ind+3 for word, ind in w2i.iteritems()}
         self.pos = {word: ind for ind, word in enumerate(pos)}
         self.id2pos = {ind: word for ind, word in enumerate(pos)}
+        self.morphs = {feats : ind for ind, feats in enumerate(morphs)} #
+        self.id2morph = list(morphs)        
         self.c2i = c2i
         self.rels = {word: ind for ind, word in enumerate(rels)}
         self.irels = rels
@@ -97,6 +99,8 @@ class jPosDepLearner:
             self.routBias = self.model.add_parameters((len(self.irels)))
         
         self.char_rnn = RNNSequencePredictor(LSTMBuilder(1, self.cdims, self.cdims, self.model))
+        self.charSeqPredictor = FFSequencePredictor(Layer(self.model, self.cdims*2, len(self.morphs), softmax))    
+
 
     def  __getExpr(self, sentence, i, j, train):
 
@@ -157,7 +161,7 @@ class jPosDepLearner:
                     rev_last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in reversed(entry.idChars)])[-1]
                       
                     entry.vec = concatenate(filter(None, [wordvec, evec, last_state, rev_last_state]))
-
+                    entry.ch_vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [last_state, rev_last_state])])
                     entry.lstms = [entry.vec, entry.vec]
                     entry.headfov = None
                     entry.modfov = None
@@ -166,6 +170,11 @@ class jPosDepLearner:
                     entry.rmodfov = None
 
                 if self.blstmFlag:
+                    morcat_layer = [entry.ch_vec for entry in conll_sentence]
+                    morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
+                    predicted_morph_idx = [np.argmax(o.value()) for o in morph_logits]
+                    predicted_morphs = [self.id2morph[idx] for idx in predicted_morph_idx]
+
                     lstm_forward = self.builders[0].initial_state()
                     lstm_backward = self.builders[1].initial_state()
 
@@ -175,7 +184,12 @@ class jPosDepLearner:
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
-
+                    
+                    concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
+                    outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
+                    predicted_pos_indices = [np.argmax(o.value()) for o in outputFFlayer]  
+                    predicted_postags = [self.id2pos[idx] for idx in predicted_pos_indices]
+                
                     if self.bibiFlag:
                         for entry in conll_sentence:
                             entry.vec = concatenate(entry.lstms)
@@ -205,17 +219,12 @@ class jPosDepLearner:
                             heads[index] = rootWid
                             rootWid = index
                         
-
-                concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
-                outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
-                predicted_pos_indices = [np.argmax(o.value()) for o in outputFFlayer]  
-                predicted_postags = [self.id2pos[idx] for idx in predicted_pos_indices]
                 
-                
-                for entry, head, pos in zip(conll_sentence, heads, predicted_postags):
+                for entry, head, pos, feats in zip(conll_sentence, heads, predicted_postags, predicted_morphs):
                     entry.pred_parent_id = head
                     entry.pred_relation = '_'
                     entry.pred_pos = pos
+                    entry.pred_feats = feats
 
                 dump = False
 
@@ -245,6 +254,7 @@ class jPosDepLearner:
             errs = []
             lerrs = []
             posErrs = []
+            morphErrs = []
             eeloss = 0.0
 
             for iSentence, sentence in enumerate(shuffledData):
@@ -272,8 +282,10 @@ class jPosDepLearner:
                     last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in entry.idChars])[-1]
                     rev_last_state = self.char_rnn.predict_sequence([self.clookup[c] for c in reversed(entry.idChars)])[-1]
                     
+
+                    # entry.vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [wordvec, evec, last_state, rev_last_state])])
                     entry.vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [wordvec, evec, last_state, rev_last_state])])
-                    
+                    entry.ch_vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [last_state, rev_last_state])])
                     entry.lstms = [entry.vec, entry.vec]
                     entry.headfov = None
                     entry.modfov = None
@@ -282,6 +294,13 @@ class jPosDepLearner:
                     entry.rmodfov = None
 
                 if self.blstmFlag:
+                    
+                    morcat_layer = [entry.ch_vec for entry in conll_sentence]
+                    morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
+                    morphIDs = [self.morphs.get(entry.feats) for entry in conll_sentence]
+                    for pred, gold in zip(morph_logits, morphIDs):
+                        morphErrs.append(self.pick_neg_log(pred, gold))
+
                     lstm_forward = self.builders[0].initial_state()
                     lstm_backward = self.builders[1].initial_state()
 
@@ -291,6 +310,13 @@ class jPosDepLearner:
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
+                    # POS layer
+                    concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
+                    concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
+                    outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
+                    posIDs  = [self.pos.get(entry.pos) for entry in conll_sentence ]
+                    for pred, gold in zip(outputFFlayer, posIDs):
+                        posErrs.append(self.pick_neg_log(pred,gold))
 
                     if self.bibiFlag:
                         for entry in conll_sentence:
@@ -328,26 +354,19 @@ class jPosDepLearner:
 
                 etotal += len(conll_sentence)
                 
-                
-                concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
-                concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
-                outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
-                posIDs  = [self.pos.get(entry.pos) for entry in conll_sentence ]
-                for pred, gold in zip(outputFFlayer, posIDs):
-                    posErrs.append(self.pick_neg_log(pred,gold))
 
                 if iSentence % 1 == 0 or len(errs) > 0 or len(lerrs) > 0 or len(posErrs) > 0:
                     eeloss = 0.0
 
                     if len(errs) > 0 or len(lerrs) > 0 or len(posErrs) > 0:
-                        eerrs = (esum(errs + lerrs + posErrs)) #* (1.0/(float(len(errs))))
+                        eerrs = (esum(errs + lerrs + posErrs + morphErrs)) #* (1.0/(float(len(errs))))
                         eerrs.scalar_value()
                         eerrs.backward()
                         self.trainer.update()
                         errs = []
                         lerrs = []
                         posErrs = []
-                        
+                        morphErrs = []
                     renew_cg()
 
         if len(errs) > 0:
