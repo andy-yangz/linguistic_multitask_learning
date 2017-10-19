@@ -59,8 +59,8 @@ class jPosDepLearner:
             print 'Load external embedding. Vector dimensions', self.edim
 
         if self.bibiFlag:
-            self.builders = [VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.ldims, self.model),
-                             VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.ldims, self.model)]
+            self.builders = [VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model),
+                             VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model)]
             self.bbuilders = [VanillaLSTMBuilder(1, self.ldims * 2 + self.pdims, self.ldims, self.model),
                               VanillaLSTMBuilder(1, self.ldims * 2 + self.pdims, self.ldims, self.model)]
         elif self.layers > 0:   
@@ -184,22 +184,18 @@ class jPosDepLearner:
                     entry.rmodfov = None
 
                 if self.blstmFlag:
-                    morph_emd = []
+
                     morcat_layer = [entry.ch_vec for entry in conll_sentence]
                     morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
                     predicted_morph_idx = [np.argmax(o.value()) for o in morph_logits]
                     predicted_morphs = [self.id2morph[idx] for idx in predicted_morph_idx]
 
-                    for pred in morph_logits:
-                        morph_emd.append(soft_embed(pred.value(), self.mlookup))
-
                     lstm_forward = self.builders[0].initial_state()
                     lstm_backward = self.builders[1].initial_state()
 
-                    for entry, rentry, membed, revmembed in zip(conll_sentence, reversed(conll_sentence), 
-                                                                    morph_emd, reversed(morph_emd)):
-                        lstm_forward = lstm_forward.add_input(concatenate([entry.vec, membed]))
-                        lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, revmembed]))
+                    for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
+                        lstm_forward = lstm_forward.add_input(entry.vec)
+                        lstm_backward = lstm_backward.add_input(rentry.vec)
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
@@ -317,21 +313,13 @@ class jPosDepLearner:
 
                 if self.blstmFlag:
                     # Morphological layer
-                    morph_emd = []
-                    morcat_layer = [entry.ch_vec for entry in conll_sentence]
-                    morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
-                    morphIDs = [self.morphs.get(entry.feats) for entry in conll_sentence]
-                    for pred, gold in zip(morph_logits, morphIDs):
-                        morphErrs.append(self.pick_neg_log(pred, gold))
-                        morph_emd.append(soft_embed(pred.value(), self.mlookup))
 
                     lstm_forward = self.builders[0].initial_state()
                     lstm_backward = self.builders[1].initial_state()
 
-                    for entry, rentry, membed, revmembed in zip(conll_sentence, reversed(conll_sentence), 
-                                                                morph_emd, reversed(morph_emd)):
-                        lstm_forward = lstm_forward.add_input(concatenate([entry.vec, membed]))
-                        lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, revmembed]))
+                    for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
+                        lstm_forward = lstm_forward.add_input(entry.vec)
+                        lstm_backward = lstm_backward.add_input(rentry.vec)
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()

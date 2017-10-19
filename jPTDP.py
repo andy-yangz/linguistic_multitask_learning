@@ -82,6 +82,7 @@ if __name__ == '__main__':
                 devPredSents = parser.Predict(options.conll_dev)
                 
                 count = 0
+                uasCount = 0
                 lasCount = 0
                 posCount = 0
                 morphCount = 0
@@ -98,11 +99,14 @@ if __name__ == '__main__':
                             posCount += 1
                         if entry.feats == entry.pred_feats:
                             morphCount += 1
+                        if entry.parent_id == entry.pred_parent_id:
+                            uasCount += 1
                         if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
                             lasCount += 1
                         count += 1
                         
                 print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
+                print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
                 print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
                 print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
                 print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
