@@ -27,7 +27,8 @@ class jPosDepLearner:
         self.cdims = options.cembedding_dims
         self.mdims = options.membedding_dims
         self.pdims = options.pembedding_dims
-        self.layers = options.lstm_layers
+        self.pos_layer = options.pos_layer
+        self.dep_layer = options.dep_layer
 
         self.wordsCount = vocab
         self.vocab = {word: ind+3 for word, ind in w2i.iteritems()}
@@ -59,17 +60,13 @@ class jPosDepLearner:
             print 'Load external embedding. Vector dimensions', self.edim
 
         if self.bibiFlag:
-            self.builders = [VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model),
-                             VanillaLSTMBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model)]
-            self.bbuilders = [VanillaLSTMBuilder(1, self.ldims * 2 + self.pdims, self.ldims, self.model),
-                              VanillaLSTMBuilder(1, self.ldims * 2 + self.pdims, self.ldims, self.model)]
-        elif self.layers > 0:   
-            self.builders = [VanillaLSTMBuilder(self.layers, self.wdims + self.edim, self.ldims, self.model),
-                             VanillaLSTMBuilder(self.layers, self.wdims + self.edim, self.ldims, self.model)]
-        else:
-            self.builders = [SimpleRNNBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model),
-                             SimpleRNNBuilder(1, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model)]
-            
+            self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model),
+                                VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model)]
+            self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.ldims * 2 + self.pdims, self.ldims, self.model),
+                                 VanillaLSTMBuilder(self.dep_layer, self.ldims * 2 + self.pdims, self.ldims, self.model)]
+
+
+
         self.ffSeqPredictor = FFSequencePredictor(Layer(self.model, self.ldims*2, len(self.pos), softmax))    
 
         self.hidden_units = options.hidden_units
@@ -190,8 +187,8 @@ class jPosDepLearner:
                     predicted_morph_idx = [np.argmax(o.value()) for o in morph_logits]
                     predicted_morphs = [self.id2morph[idx] for idx in predicted_morph_idx]
 
-                    lstm_forward = self.builders[0].initial_state()
-                    lstm_backward = self.builders[1].initial_state()
+                    lstm_forward = self.pos_builder[0].initial_state()
+                    lstm_backward = self.pos_builder[1].initial_state()
 
                     for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
                         lstm_forward = lstm_forward.add_input(entry.vec)
@@ -212,8 +209,8 @@ class jPosDepLearner:
                         for entry in conll_sentence:
                             entry.vec = concatenate(entry.lstms)
 
-                        blstm_forward = self.bbuilders[0].initial_state()
-                        blstm_backward = self.bbuilders[1].initial_state()
+                        blstm_forward = self.dep_builders[0].initial_state()
+                        blstm_backward = self.dep_builders[1].initial_state()
 
                         for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
                                                                     pos_embed, reversed(pos_embed)):
@@ -314,15 +311,15 @@ class jPosDepLearner:
                 if self.blstmFlag:
                     # Morphological layer
 
-                    lstm_forward = self.builders[0].initial_state()
-                    lstm_backward = self.builders[1].initial_state()
+                    lstm_forward = self.pos_builder[0].initial_state()
+                    lstm_backward = self.pos_builder[1].initial_state()
 
                     for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
                         lstm_forward = lstm_forward.add_input(entry.vec)
                         lstm_backward = lstm_backward.add_input(rentry.vec)
-
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
+
                     # POS layer
                     pos_embed = []
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
@@ -338,8 +335,8 @@ class jPosDepLearner:
                         for entry in conll_sentence:
                             entry.vec = concatenate(entry.lstms)
 
-                        blstm_forward = self.bbuilders[0].initial_state()
-                        blstm_backward = self.bbuilders[1].initial_state()
+                        blstm_forward = self.dep_builders[0].initial_state()
+                        blstm_backward = self.dep_builders[1].initial_state()
 
                         for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
                                                                     pos_embed, reversed(pos_embed)):

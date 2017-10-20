@@ -16,6 +16,8 @@ if __name__ == '__main__':
     parser.add_option("--cembedding", type="int", dest="cembedding_dims", default=64)
     parser.add_option("--membedding", type="int", dest="membedding_dims", default=64)
     parser.add_option("--pembedding", type="int", dest="pembedding_dims", default=32)
+    parser.add_option("--pos_layer", type="int", dest="pos_layer", default=1)
+    parser.add_option("--dep_layer", type="int", dest="dep_layer", default=1)    
     parser.add_option("--epochs", type="int", dest="epochs", default=30)
     parser.add_option("--hidden", type="int", dest="hidden_units", default=100)
     parser.add_option("--hidden2", type="int", dest="hidden2_units", default=0)
@@ -67,6 +69,8 @@ if __name__ == '__main__':
             pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
         
         print 'Initializing joint model'
+        print 'POS layer: ' + str(options.pos_layer)
+        print 'Dep layer: ' + str(options.dep_layer)
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, options)
         
         highestScore = 0.0
