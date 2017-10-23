@@ -22,7 +22,8 @@ class jPosDepLearner:
         self.costaugFlag = options.costaugFlag
         self.bibiFlag = options.bibiFlag
 
-        self.ldims = options.lstm_dims
+        self.pos_ldims = options.pos_lstm_dims
+        self.dep_ldims = options.dep_lstm_dims
         self.wdims = options.wembedding_dims
         self.cdims = options.cembedding_dims
         self.mdims = options.membedding_dims
@@ -60,16 +61,16 @@ class jPosDepLearner:
             print 'Load external embedding. Vector dimensions', self.edim
 
         if self.bibiFlag:
-            self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model),
-                                VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.ldims, self.model)]
-            self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.ldims * 2 + self.pdims, self.ldims, self.model),
-                                 VanillaLSTMBuilder(self.dep_layer, self.ldims * 2 + self.pdims, self.ldims, self.model)]
+            self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model),
+                                VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model)]
+            self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model),
+                                 VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model)]
 
+        self.ffSeqPredictor = FFSequencePredictor(Layer(self.model, self.pos_ldims * 2, len(self.pos), softmax))    
 
+        self.arc_hid = options.arc_hidden
+        self.rel_hid = options.rel_hidden
 
-        self.ffSeqPredictor = FFSequencePredictor(Layer(self.model, self.ldims*2, len(self.pos), softmax))    
-
-        self.hidden_units = options.hidden_units
         self.hidden2_units = options.hidden2_units
 
         self.vocab['*PAD*'] = 1
@@ -81,24 +82,24 @@ class jPosDepLearner:
         self.mlookup = self.model.add_lookup_parameters((len(morphs), self.mdims))
         self.plookup = self.model.add_lookup_parameters((len(pos), self.pdims))
 
-        self.hidLayerFOH = self.model.add_parameters((self.hidden_units, self.ldims * 2))
-        self.hidLayerFOM = self.model.add_parameters((self.hidden_units, self.ldims * 2))
-        self.hidBias = self.model.add_parameters((self.hidden_units))
+        self.hidLayerFOH = self.model.add_parameters((self.arc_hid, self.dep_ldims * 2))
+        self.hidLayerFOM = self.model.add_parameters((self.arc_hid, self.dep_ldims * 2))
+        self.hidBias = self.model.add_parameters((self.arc_hid))
 
-        self.hid2Layer = self.model.add_parameters((self.hidden2_units, self.hidden_units))
+        self.hid2Layer = self.model.add_parameters((self.hidden2_units, self.arc_hid))
         self.hid2Bias = self.model.add_parameters((self.hidden2_units))
 
-        self.outLayer = self.model.add_parameters((1, self.hidden2_units if self.hidden2_units > 0 else self.hidden_units))
+        self.outLayer = self.model.add_parameters((1, self.hidden2_units if self.hidden2_units > 0 else self.arc_hid))
 
         if self.labelsFlag:
-            self.rhidLayerFOH = self.model.add_parameters((self.hidden_units, 2 * self.ldims))
-            self.rhidLayerFOM = self.model.add_parameters((self.hidden_units, 2 * self.ldims))
-            self.rhidBias = self.model.add_parameters((self.hidden_units))
+            self.rhidLayerFOH = self.model.add_parameters((self.rel_hid, 2 * self.dep_ldims))
+            self.rhidLayerFOM = self.model.add_parameters((self.rel_hid, 2 * self.dep_ldims))
+            self.rhidBias = self.model.add_parameters((self.rel_hid))
 
-            self.rhid2Layer = self.model.add_parameters((self.hidden2_units, self.hidden_units))
+            self.rhid2Layer = self.model.add_parameters((self.hidden2_units, self.rel_hid))
             self.rhid2Bias = self.model.add_parameters((self.hidden2_units))
 
-            self.routLayer = self.model.add_parameters((len(self.irels), self.hidden2_units if self.hidden2_units > 0 else self.hidden_units))
+            self.routLayer = self.model.add_parameters((len(self.irels), self.hidden2_units if self.hidden2_units > 0 else self.rel_hid))
             self.routBias = self.model.add_parameters((len(self.irels)))
         
         self.char_rnn = RNNSequencePredictor(LSTMBuilder(1, self.cdims, self.cdims, self.model))
@@ -258,7 +259,9 @@ class jPosDepLearner:
         errors = 0
         batch = 0
         eloss = 0.0
+        pos_eloss = 0.0
         mloss = 0.0
+        pos_mloss = 0.0
         eerrors = 0
         etotal = 0
         start = time.time()
@@ -272,16 +275,18 @@ class jPosDepLearner:
             posErrs = []
             morphErrs = []
             eeloss = 0.0
+            nwords = 0
 
             for iSentence, sentence in enumerate(shuffledData):
                 if iSentence % 500 == 0 and iSentence != 0:
-                    print "Processing sentence number: %d" % iSentence, ", Loss: %.2f" % (eloss / etotal), ", Time: %.2f" % (time.time()-start)
+                    print "Processing sentence number: %d" % iSentence, ",Dep Loss: %.2f" % (eloss / etotal), ",POS Loss: %.2f" % (pos_eloss / etotal), ", Time: %.2f" % (time.time()-start)
                     start = time.time()
-                    eerrors = 0
+                    pos_eloss = 0.0
+                    eerrors = 0.0
                     eloss = 0.0
-                    etotal = 0
-                    lerrors = 0
-                    ltotal = 0
+                    etotal = 0.0
+                    lerrors = 0.0
+                    ltotal = 0.0
 
                 conll_sentence = [entry for entry in sentence if isinstance(entry, utils.ConllEntry)]
 
@@ -325,11 +330,16 @@ class jPosDepLearner:
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
                     concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
                     outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
+                    predicted_posIDs = [np.argmax(o.value()) for o in outputFFlayer]  
                     posIDs  = [self.pos.get(entry.pos) for entry in conll_sentence ]
                     for pred, gold in zip(outputFFlayer, posIDs):
                         posErrs.append(self.pick_neg_log(pred,gold))
                     # POS embedding
-                        pos_embed.append(soft_embed(pred.value(), self.plookup))    
+                        pos_embed.append(soft_embed(pred.value(), self.plookup))
+
+                    pos_e = sum([1 for p, g in zip(predicted_posIDs[1:], posIDs[1:]) if p != g])  
+                    pos_eloss += pos_e
+                    pos_mloss += pos_e
 
                     if self.bibiFlag:
                         for entry in conll_sentence:
@@ -366,9 +376,9 @@ class jPosDepLearner:
                     mloss += (e)
                     errs.extend(loss)
 
-                etotal += len(conll_sentence)
+                etotal += len(conll_sentence) - 1
+                nwords += len(sentence) - 1
                 
-
                 if iSentence % 1 == 0 or len(errs) > 0 or len(lerrs) > 0 or len(posErrs) > 0:
                     eeloss = 0.0
 
@@ -397,7 +407,8 @@ class jPosDepLearner:
             renew_cg()
 
         self.trainer.update()
-        print "Loss: %.2f" % (mloss/iSentence)
+        print "Dep Accu: %.2f" % ((1 - mloss/nwords) * 100)
+        print "POS Accu: %.2f" % ((1 - pos_mloss/nwords) * 100)
 
 
 def soft_embed(vec, lookup):
