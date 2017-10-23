@@ -32,6 +32,7 @@ class jPosDepLearner:
         self.dep_layer = options.dep_layer
         self.pos_drop_rate = options.pos_dropout
         self.dep_drop_rate = options.dep_dropout
+        self.gold_pos = options.gold_pos
 
         self.wordsCount = vocab
         self.vocab = {word: ind+3 for word, ind in w2i.iteritems()}
@@ -205,11 +206,14 @@ class jPosDepLearner:
                     pos_embed = []
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
                     outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
-                    predicted_pos_indices = [np.argmax(o.value()) for o in outputFFlayer]  
-                    predicted_postags = [self.id2pos[idx] for idx in predicted_pos_indices]
-                    for pred in outputFFlayer:
-                        pos_embed.append(soft_embed(pred.value(), self.plookup))
-                
+                    predicted_posIDs = [np.argmax(o.value()) for o in outputFFlayer]  
+                    predicted_postags = [self.id2pos[idx] for idx in predicted_posIDs]
+                    for predID, pred in zip(predicted_posIDs, outputFFlayer):
+                        if self.gold_pos:
+                            pos_embed.append(self.plookup[predID])
+                        else:
+                            pos_embed.append(soft_embed(pred.value(), self.plookup))
+                            
                     if self.bibiFlag:
                         for entry in conll_sentence:
                             entry.vec = concatenate(entry.lstms)
@@ -339,10 +343,13 @@ class jPosDepLearner:
                     outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
                     predicted_posIDs = [np.argmax(o.value()) for o in outputFFlayer]  
                     posIDs  = [self.pos.get(entry.pos) for entry in conll_sentence ]
-                    for pred, gold in zip(outputFFlayer, posIDs):
+                    for predID, pred, gold in zip(predicted_posIDs, outputFFlayer, posIDs):
                         posErrs.append(self.pick_neg_log(pred,gold))
                     # POS embedding
-                        pos_embed.append(soft_embed(pred.value(), self.plookup))
+                        if self.gold_pos:
+                            pos_embed.append(self.plookup[predID])
+                        else:
+                            pos_embed.append(soft_embed(pred.value(), self.plookup))
 
                     pos_e = sum([1 for p, g in zip(predicted_posIDs[1:], posIDs[1:]) if p != g])  
                     pos_eloss += pos_e
