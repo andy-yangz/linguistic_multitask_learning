@@ -30,6 +30,8 @@ class jPosDepLearner:
         self.pdims = options.pembedding_dims
         self.pos_layer = options.pos_layer
         self.dep_layer = options.dep_layer
+        self.pos_drop_rate = options.pos_dropout
+        self.dep_drop_rate = options.dep_dropout
 
         self.wordsCount = vocab
         self.vocab = {word: ind+3 for word, ind in w2i.iteritems()}
@@ -188,6 +190,8 @@ class jPosDepLearner:
                     predicted_morph_idx = [np.argmax(o.value()) for o in morph_logits]
                     predicted_morphs = [self.id2morph[idx] for idx in predicted_morph_idx]
 
+                    for builder in self.pos_builder:
+                        builder.disable_dropout()
                     lstm_forward = self.pos_builder[0].initial_state()
                     lstm_backward = self.pos_builder[1].initial_state()
 
@@ -209,7 +213,8 @@ class jPosDepLearner:
                     if self.bibiFlag:
                         for entry in conll_sentence:
                             entry.vec = concatenate(entry.lstms)
-
+                        for builder in self.dep_builders:
+                            builder.disable_dropout()
                         blstm_forward = self.dep_builders[0].initial_state()
                         blstm_backward = self.dep_builders[1].initial_state()
 
@@ -315,7 +320,9 @@ class jPosDepLearner:
 
                 if self.blstmFlag:
                     # Morphological layer
-
+                    # POS LSTM layer
+                    for builder in self.pos_builder:
+                        builder.set_dropout(self.pos_drop_rate)
                     lstm_forward = self.pos_builder[0].initial_state()
                     lstm_backward = self.pos_builder[1].initial_state()
 
@@ -325,7 +332,7 @@ class jPosDepLearner:
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
 
-                    # POS layer
+                    # POS MLP layer
                     pos_embed = []
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
                     concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
@@ -344,7 +351,8 @@ class jPosDepLearner:
                     if self.bibiFlag:
                         for entry in conll_sentence:
                             entry.vec = concatenate(entry.lstms)
-
+                        for builder in self.dep_builders:
+                            builder.set_dropout(self.dep_drop_rate)
                         blstm_forward = self.dep_builders[0].initial_state()
                         blstm_backward = self.dep_builders[1].initial_state()
 
