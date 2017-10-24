@@ -64,10 +64,10 @@ class jPosDepLearner:
             print 'Load external embedding. Vector dimensions', self.edim
 
         if self.bibiFlag:
-            self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model),
-                                VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model)]
-            self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model),
-                                 VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model)]
+            self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.pos_ldims, self.model),
+                                VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.pos_ldims, self.model)]
+            self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims + self.mdims, self.dep_ldims, self.model),
+                                 VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims + self.mdims, self.dep_ldims, self.model)]
 
         self.ffSeqPredictor = FFSequencePredictor(Layer(self.model, self.pos_ldims * 2, len(self.pos), softmax))    
 
@@ -177,6 +177,7 @@ class jPosDepLearner:
                       
                     entry.vec = concatenate(filter(None, [wordvec, evec, last_state, rev_last_state]))
                     entry.ch_vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [last_state, rev_last_state])])
+                    entry.gold_morph = self.mlookup[self.morphs.get(entry.feats)]                    
                     entry.lstms = [entry.vec, entry.vec]
                     entry.headfov = None
                     entry.modfov = None
@@ -197,20 +198,28 @@ class jPosDepLearner:
                     lstm_backward = self.pos_builder[1].initial_state()
 
                     for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
-                        lstm_forward = lstm_forward.add_input(entry.vec)
-                        lstm_backward = lstm_backward.add_input(rentry.vec)
+                        lstm_forward = lstm_forward.add_input(concatenate([entry.vec, entry.gold_morph]))                   
+                        lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, rentry.gold_morph]))
 
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
+
+                    # for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
+                    #     lstm_forward = lstm_forward.add_input(entry.vec)
+                    #     lstm_backward = lstm_backward.add_input(rentry.vec)
+
+                    #     entry.lstms[1] = lstm_forward.output()
+                    #     rentry.lstms[0] = lstm_backward.output()
 
                     pos_embed = []
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
                     outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
                     predicted_posIDs = [np.argmax(o.value()) for o in outputFFlayer]  
                     predicted_postags = [self.id2pos[idx] for idx in predicted_posIDs]
-                    for predID, pred in zip(predicted_posIDs, outputFFlayer):
+                    posIDs = [self.pos.get(entry.pos) for entry in conll_sentence ]
+                    for predID, pred, gold in zip(predicted_posIDs, outputFFlayer, posIDs):
                         if self.gold_pos:
-                            pos_embed.append(self.plookup[predID])
+                            pos_embed.append(self.plookup[gold])
                         else:
                             pos_embed.append(soft_embed(pred.value(), self.plookup))
                             
@@ -224,11 +233,19 @@ class jPosDepLearner:
 
                         for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
                                                                     pos_embed, reversed(pos_embed)):
-                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
-                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
+                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed, entry.gold_morph]))
+                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed, rentry.gold_morph]))
 
                             entry.lstms[1] = blstm_forward.output()
                             rentry.lstms[0] = blstm_backward.output()
+
+                        # for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
+                        #                                             pos_embed, reversed(pos_embed)):
+                        #     blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
+                        #     blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
+
+                        #     entry.lstms[1] = blstm_forward.output()
+                        #     rentry.lstms[0] = blstm_backward.output()
 
                 scores, exprs = self.__evaluate(conll_sentence, True)
                 heads = decoder.parse_proj(scores)
@@ -315,6 +332,7 @@ class jPosDepLearner:
                     # entry.vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [wordvec, evec, last_state, rev_last_state])])
                     entry.vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [wordvec, evec, last_state, rev_last_state])])
                     entry.ch_vec = concatenate([dynet.noise(fe,0.2) for fe in filter(None, [last_state, rev_last_state])])
+                    entry.gold_morph = self.mlookup[self.morphs.get(entry.feats)]
                     entry.lstms = [entry.vec, entry.vec]
                     entry.headfov = None
                     entry.modfov = None
@@ -324,6 +342,15 @@ class jPosDepLearner:
 
                 if self.blstmFlag:
                     # Morphological layer
+                    # morph_emb = []
+                    # morcat_layer = [entry.ch_vec for entry in conll_sentence]
+                    # morph_logits = self.charSeqPredictor.predict_sequence(morcat_layer)
+                    # predicted_morph_idx = [np.argmax(o.value()) for o in morph_logits]
+                    # predicted_morphs = [self.id2morph[idx] for idx in predicted_morph_idx]
+                    # morphIDs = [self.morphs.get(entry.feats) for entry in conll_sentence]
+                    # for gold in morphIDs: 
+                    #     morph_emb.append(self.mlookup[gold])
+
                     # POS LSTM layer
                     for builder in self.pos_builder:
                         builder.set_dropout(self.pos_drop_rate)
@@ -331,10 +358,17 @@ class jPosDepLearner:
                     lstm_backward = self.pos_builder[1].initial_state()
 
                     for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
-                        lstm_forward = lstm_forward.add_input(entry.vec)
-                        lstm_backward = lstm_backward.add_input(rentry.vec)
+                        lstm_forward = lstm_forward.add_input(concatenate([entry.vec, entry.gold_morph]))                   
+                        lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, rentry.gold_morph]))
+
                         entry.lstms[1] = lstm_forward.output()
                         rentry.lstms[0] = lstm_backward.output()
+
+                    # for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
+                    #     lstm_forward = lstm_forward.add_input(entry.vec)
+                    #     lstm_backward = lstm_backward.add_input(rentry.vec)
+                    #     entry.lstms[1] = lstm_forward.output()
+                    #     rentry.lstms[0] = lstm_backward.output()
 
                     # POS MLP layer
                     pos_embed = []
@@ -342,12 +376,12 @@ class jPosDepLearner:
                     concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
                     outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
                     predicted_posIDs = [np.argmax(o.value()) for o in outputFFlayer]  
-                    posIDs  = [self.pos.get(entry.pos) for entry in conll_sentence ]
+                    posIDs = [self.pos.get(entry.pos) for entry in conll_sentence ]
                     for predID, pred, gold in zip(predicted_posIDs, outputFFlayer, posIDs):
                         posErrs.append(self.pick_neg_log(pred,gold))
                     # POS embedding
                         if self.gold_pos:
-                            pos_embed.append(self.plookup[predID])
+                            pos_embed.append(self.plookup[gold])
                         else:
                             pos_embed.append(soft_embed(pred.value(), self.plookup))
 
@@ -365,11 +399,19 @@ class jPosDepLearner:
 
                         for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
                                                                     pos_embed, reversed(pos_embed)):
-                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
-                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
+                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed, entry.gold_morph]))
+                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed, rentry.gold_morph]))
 
                             entry.lstms[1] = blstm_forward.output()
                             rentry.lstms[0] = blstm_backward.output()
+
+                        # for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
+                        #                                             pos_embed, reversed(pos_embed)):
+                        #     blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
+                        #     blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
+
+                        #     entry.lstms[1] = blstm_forward.output()
+                        #     rentry.lstms[0] = blstm_backward.output()
 
                 scores, exprs = self.__evaluate(conll_sentence, True)
                 gold = [entry.parent_id for entry in conll_sentence]

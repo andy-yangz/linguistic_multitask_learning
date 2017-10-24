@@ -31,6 +31,7 @@ if __name__ == '__main__':
     parser.add_option("--pos_lstm_dims", type="int", dest="pos_lstm_dims", default=128)
     parser.add_option("--dep_lstm_dims", type="int", dest="dep_lstm_dims", default=128)
     parser.add_option("--gold_pos", action="store_true", dest="gold_pos", default=False)
+    parser.add_option("--gold_morph", action="store_true", dest="gold_pos", default=False)
     parser.add_option("--disableblstm", action="store_false", dest="blstmFlag", default=True)
     parser.add_option("--disablelabels", action="store_false", dest="labelsFlag", default=True)
     parser.add_option("--predict", action="store_true", dest="predictFlag", default=False)
