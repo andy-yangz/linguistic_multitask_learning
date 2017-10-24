@@ -18,8 +18,11 @@ if __name__ == '__main__':
     parser.add_option("--pembedding", type="int", dest="pembedding_dims", default=32)
     parser.add_option("--pos_layer", type="int", dest="pos_layer", default=1)
     parser.add_option("--dep_layer", type="int", dest="dep_layer", default=1)
+    parser.add_option("--morph_layer", type="int", dest="morph_layer", default=1,
+                      help="Layers of Morph LSTM")
     parser.add_option("--pos_dropout", type="float", dest="pos_dropout", default=0.2)
     parser.add_option("--dep_dropout", type="float", dest="dep_dropout", default=0.2)
+    parser.add_option("--morph_dropout", type="float", dest="morph_dropout", default=0.2)
     parser.add_option("--epochs", type="int", dest="epochs", default=30)
     parser.add_option("--arc_hidden", type="int", dest="arc_hidden", default=100)
     parser.add_option("--rel_hidden", type="int", dest="rel_hidden", default=100)    
@@ -30,8 +33,10 @@ if __name__ == '__main__':
     parser.add_option("--lstmlayers", type="int", dest="lstm_layers", default=2)
     parser.add_option("--pos_lstm_dims", type="int", dest="pos_lstm_dims", default=128)
     parser.add_option("--dep_lstm_dims", type="int", dest="dep_lstm_dims", default=128)
+    parser.add_option("--morph_lstm_dims", type="int", dest="morph_lstm_dims", default=128)
     parser.add_option("--gold_pos", action="store_true", dest="gold_pos", default=False)
-    parser.add_option("--gold_morph", action="store_true", dest="gold_pos", default=False)
+    parser.add_option("--gold_morph", action="store_true", dest="gold_morph", default=False)
+    parser.add_option("--soft_embed", action="store_true", dest="soft_embed", default=False)
     parser.add_option("--disableblstm", action="store_false", dest="blstmFlag", default=True)
     parser.add_option("--disablelabels", action="store_false", dest="labelsFlag", default=True)
     parser.add_option("--predict", action="store_true", dest="predictFlag", default=False)
@@ -75,8 +80,9 @@ if __name__ == '__main__':
             pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
         
         print 'Initializing joint model'
-        print 'POS layer: %d, POS LSTM dims: %d' % (options.pos_layer, options.pos_lstm_dims)
-        print 'Dep layer: %d, Dep LSTM dims: %d' % (options.dep_layer, options.dep_lstm_dims)
+        print 'Morph Layer: %d, Morph LSTM dims: %d' % (options.morph_layer, options.morph_lstm_dims)
+        print 'POS layer: %d, LSTM dims: %d, dropout: %f' % (options.pos_layer, options.pos_lstm_dims, options.pos_dropout)
+        print 'Dep layer: %d, LSTM dims: %d, dropout: %f' % (options.dep_layer, options.dep_lstm_dims, options.dep_dropout)
         # print 'Learning Rate: %f' % (options.learning_rate)
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, options)
         
@@ -98,6 +104,7 @@ if __name__ == '__main__':
                 posCount = 0
                 morphCount = 0
                 poslasCount = 0
+                morphposlasCount = 0 
                 for idSent, devSent in enumerate(devPredSents):
                     conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
                     
@@ -106,6 +113,8 @@ if __name__ == '__main__':
                             continue
                         if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
                             poslasCount += 1
+                        if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation and entry.feats == entry.pred_feats:
+                            morphposlasCount += 1
                         if entry.pos == entry.pred_pos:
                             posCount += 1
                         if entry.feats == entry.pred_feats:
@@ -120,6 +129,7 @@ if __name__ == '__main__':
                 print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
                 print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
                 print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
+                print "Morph&POS&LAS:\t%.2f" % (float(morphposlasCount) * 100 / count)
                 print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
                 
                 score = float(poslasCount) * 100 / count
