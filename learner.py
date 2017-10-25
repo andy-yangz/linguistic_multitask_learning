@@ -37,7 +37,8 @@ class jPosDepLearner:
         self.morph_drop_rate = options.morph_dropout
         self.gold_pos = options.gold_pos
         self.gold_morph = options.gold_morph
-        self.soft_embed = options.soft_embed
+        self.morph_soft_embed = options.morph_soft_embed
+        self.pos_soft_embed = options.pos_soft_embed
 
         self.wordsCount = vocab
         self.vocab = {word: ind+3 for word, ind in w2i.iteritems()}
@@ -110,8 +111,8 @@ class jPosDepLearner:
             self.routLayer = self.model.add_parameters((len(self.irels), self.hidden2_units if self.hidden2_units > 0 else self.rel_hid))
             self.routBias = self.model.add_parameters((len(self.irels)))
 
-        self.mbuilders = [VanillaLSTMBuilder(self.morph_layer, self.cdims * 2, self.morph_ldims, self.model),
-                          VanillaLSTMBuilder(self.morph_layer, self.cdims * 2, self.morph_ldims, self.model)]
+        self.morph_builders = [VanillaLSTMBuilder(self.morph_layer, self.cdims * 2, self.morph_ldims, self.model),
+                               VanillaLSTMBuilder(self.morph_layer, self.cdims * 2, self.morph_ldims, self.model)]
         self.char_rnn = RNNSequencePredictor(LSTMBuilder(1, self.cdims, self.cdims, self.model))
         self.charSeqPredictor = FFSequencePredictor(Layer(self.model, self.morph_ldims * 2, len(self.morphs), softmax))
 
@@ -186,8 +187,10 @@ class jPosDepLearner:
 
                 if self.blstmFlag:
                     # Morphlogy
-                    lstm_forward = self.mbuilders[0].initial_state()
-                    lstm_backward = self.mbuilders[1].initial_state()
+                    for builder in self.morph_builders:
+                        builder.disable_dropout()
+                    lstm_forward = self.morph_builders[0].initial_state()
+                    lstm_backward = self.morph_builders[1].initial_state()
                     for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
                         lstm_forward = lstm_forward.add_input(entry.ch_vec)
                         lstm_backward = lstm_backward.add_input(rentry.ch_vec)
@@ -196,7 +199,6 @@ class jPosDepLearner:
                         rentry.lstms[0] = lstm_backward.output()
 
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
-                    concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
                     
                     morph_embed = []
                     morph_logits = self.charSeqPredictor.predict_sequence(concat_layer)
@@ -206,8 +208,8 @@ class jPosDepLearner:
                     for predID, pred, gold in zip(predicted_morphIDs, morph_logits, morphIDs):
                         if self.gold_morph:
                             morph_embed.append(self.mlookup[gold])
-                        elif self.soft_embed:
-                            morph_embed.append(soft_embed(pred.value(), self.plookup))
+                        elif self.morph_soft_embed:
+                            morph_embed.append(soft_embed(pred.value(), self.mlookup))
                         else:
                             morph_embed.append(self.mlookup[predID])
                     # POS
@@ -217,7 +219,7 @@ class jPosDepLearner:
                     lstm_backward = self.pos_builder[1].initial_state()
 
                     for entry, rentry, membed, revmembed in zip(conll_sentence, reversed(conll_sentence),
-                                                                 morph_embed, reversed(morph_embed)):
+                                                                morph_embed, reversed(morph_embed)):
                         lstm_forward = lstm_forward.add_input(concatenate([entry.vec, membed]))                   
                         lstm_backward = lstm_backward.add_input(concatenate([rentry.vec, revmembed]))
 
@@ -233,7 +235,6 @@ class jPosDepLearner:
 
                     pos_embed = []
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
-                    concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
                     outputFFlayer = self.ffSeqPredictor.predict_sequence(concat_layer)
                     predicted_posIDs = [np.argmax(o.value()) for o in outputFFlayer]  
                     predicted_postags = [self.id2pos[idx] for idx in predicted_posIDs]
@@ -241,7 +242,7 @@ class jPosDepLearner:
                     for predID, pred, gold in zip(predicted_posIDs, outputFFlayer, posIDs):
                         if self.gold_pos:
                             pos_embed.append(self.plookup[gold])
-                        elif self.soft_embed:
+                        elif self.pos_soft_embed:
                             pos_embed.append(soft_embed(pred.value(), self.plookup))
                         else:
                             pos_embed.append(self.plookup[predID])      
@@ -330,9 +331,7 @@ class jPosDepLearner:
 
             for iSentence, sentence in enumerate(shuffledData):
                 if iSentence % 500 == 0 and iSentence != 0:
-                    print "Processing sentence number: %d \n" % iSentence, 
-                    print "Dep Loss: %.2f" % (dep_eloss / etotal), ",POS Loss: %.2f" % (pos_eloss / etotal), ",Morph Loss: %.2f" % (morph_eloss / etotal)
-                    print "Time: %.2f" % (time.time()-start) 
+                    print "Processing sentence number: %d" % iSentence, ",Dep Loss: %.2f" % (dep_eloss / etotal), ",POS Loss: %.2f" % (pos_eloss / etotal), ",Morph Loss: %.2f" % (morph_eloss / etotal), ",Time: %.2f" % (time.time()-start)
                     start = time.time()
                     pos_eloss = 0.0
                     dep_eloss = 0.0
@@ -366,8 +365,10 @@ class jPosDepLearner:
 
                 if self.blstmFlag:
                     # Morphological layer
-                    lstm_forward = self.mbuilders[0].initial_state()
-                    lstm_backward = self.mbuilders[1].initial_state()
+                    for builder in self.morph_builders:
+                        builder.set_dropout(self.morph_drop_rate)
+                    lstm_forward = self.morph_builders[0].initial_state()
+                    lstm_backward = self.morph_builders[1].initial_state()
                     for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
                         lstm_forward = lstm_forward.add_input(entry.ch_vec)
                         lstm_backward = lstm_backward.add_input(rentry.ch_vec)
@@ -376,7 +377,6 @@ class jPosDepLearner:
                         rentry.lstms[0] = lstm_backward.output()
 
                     concat_layer = [concatenate(entry.lstms) for entry in conll_sentence]
-                    concat_layer = [dynet.noise(fe,0.2) for fe in concat_layer]
 
                     # Morph Linear
                     morph_embed = []
@@ -387,8 +387,8 @@ class jPosDepLearner:
                         morphErrs.append(self.pick_neg_log(pred, gold))
                         if self.gold_morph:
                             morph_embed.append(self.mlookup[gold])
-                        elif self.soft_embed:
-                            morph_embed.append(soft_embed(pred.value(), self.plookup))
+                        elif self.morph_soft_embed:
+                            morph_embed.append(soft_embed(pred.value(), self.mlookup))
                         else:
                             morph_embed.append(self.mlookup[predID])
                     # Morph Error Collect
@@ -427,7 +427,7 @@ class jPosDepLearner:
                         posErrs.append(self.pick_neg_log(pred,gold))
                         if self.gold_pos:
                             pos_embed.append(self.plookup[gold])
-                        elif self.soft_embed:
+                        elif self.pos_soft_embed:
                             pos_embed.append(soft_embed(pred.value(), self.plookup))
                         else:
                             pos_embed.append(self.plookup[predID])                            
