@@ -49,30 +49,13 @@ class BiRNNSequencePredictor(SequencePredictor):
 
 class Layer:
     """ Class for affine layer transformation or two-layer MLP """
-    def __init__(self, model, in_dim, output_dim, activation=dynet.tanh, mlp=0, mlp_activation=dynet.rectify):
+    def __init__(self, model, in_dim, output_dim, activation=dynet.rectify):
         # if mlp > 0, add a hidden layer of that dimension
         self.act = activation
-        self.mlp = mlp
-        if mlp:
-            print('>>> use mlp with dim {} ({})<<<'.format(mlp, mlp_activation))
-            mlp_dim = mlp
-            self.mlp_activation = mlp_activation
-            self.W_mlp = model.add_parameters((mlp_dim, in_dim))
-            self.b_mlp = model.add_parameters((mlp_dim))
-        else:
-            mlp_dim = in_dim
-        self.W = model.add_parameters((output_dim, mlp_dim))
+        self.W = model.add_parameters((output_dim, in_dim))
         self.b = model.add_parameters((output_dim))
         
     def __call__(self, x):
-        if self.mlp:
-            W_mlp = dynet.parameter(self.W_mlp)
-            b_mlp = dynet.parameter(self.b_mlp)
-            act = self.mlp_activation
-            x_in = act(W_mlp * x + b_mlp)
-        else:
-            x_in = x
-        # from params to expressions
         W = dynet.parameter(self.W)
         b = dynet.parameter(self.b)
-        return self.act(W*x_in + b)
+        return self.act(W*x + b)
