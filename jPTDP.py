@@ -15,7 +15,7 @@ if __name__ == '__main__':
     parser.add_option("--wembedding", type="int", dest="wembedding_dims", default=128)
     parser.add_option("--cembedding", type="int", dest="cembedding_dims", default=64)
     parser.add_option("--membedding", type="int", dest="membedding_dims", default=64)
-    parser.add_option("--pembedding", type="int", dest="pembedding_dims", default=32)
+    parser.add_option("--pembedding", type="int", dest="pembedding_dims", default=64)
     parser.add_option("--pos_layer", type="int", dest="pos_layer", default=1)
     parser.add_option("--dep_layer", type="int", dest="dep_layer", default=1)
     parser.add_option("--morph_layer", type="int", dest="morph_layer", default=1,
@@ -28,7 +28,7 @@ if __name__ == '__main__':
     parser.add_option("--rel_hidden", type="int", dest="rel_hidden", default=100)    
     parser.add_option("--hidden2", type="int", dest="hidden2_units", default=0)
     # parser.add_option("--lr", type="float", dest="learning_rate", default=0.001)
-    parser.add_option("--outdir", type="string", dest="output", default="results")
+    parser.add_option("--outdir", type="string", dest="outdir", default="results")
     parser.add_option("--activation", type="string", dest="activation", default="tanh")
     parser.add_option("--lstmlayers", type="int", dest="lstm_layers", default=2)
     parser.add_option("--pos_lstm_dims", type="int", dest="pos_lstm_dims", default=128)
@@ -51,22 +51,47 @@ if __name__ == '__main__':
     print 'Using external embedding:', options.external_embedding
 
     if options.predictFlag:
-        with open(options.params, 'r') as paramsfp:
-            words, w2i, c2i, pos, rels, stored_opt = pickle.load(paramsfp)
+        with open(os.path.join(options.outdir, options.params), 'r') as paramsfp:
+            words, w2i, c2i, pos, rels, morphs, stored_opt = pickle.load(paramsfp)
             
         stored_opt.external_embedding = options.external_embedding
         
         print 'Loading pre-trained joint model'
-        parser = learner.jPosDepLearner(words, pos, rels, w2i, c2i, stored_opt)
-        parser.Load(options.model)
-        
-        tespath = os.path.join(options.output, options.conll_test_output)
+        parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, stored_opt)
+        parser.Load(os.path.join(options.outdir, os.path.basename(options.model)))
+        conllu = (os.path.splitext(options.conll_test.lower())[1] == '.conllu')
+        tespath = os.path.join(options.outdir, 'test_pred.conll' if not conllu else 'test_pred.conllu')
         print 'Predicting POS tags and parsing dependencies'
-        ts = time.time()
-        test_res = list(parser.Predict(options.conll_test))
-        te = time.time()
-        print 'Finished in', te-ts, 'seconds.'
-        utils.write_conll(tespath, test_res)
+        devPredSents = parser.Predict(options.conll_test)
+
+        count = 0
+        uasCount = 0
+        lasCount = 0
+        posCount = 0
+        morphCount = 0
+        poslasCount = 0
+
+        for idSent, devSent in enumerate(devPredSents):
+            conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
+            for entry in conll_devSent:
+                if entry.id <= 0:
+                    continue
+                if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
+                    poslasCount += 1
+                if entry.pos == entry.pred_pos:
+                    posCount += 1
+                if entry.feats == entry.pred_feats:
+                    morphCount += 1
+                if entry.parent_id == entry.pred_parent_id:
+                    uasCount += 1
+                if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
+                    lasCount += 1
+                count += 1             
+        print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
+        print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
+        print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
+        print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
+        print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
 
         #conllu = (os.path.splitext(options.conll_test.lower())[1] == '.conllu')
         #if not conllu:#Scored with punctuation
@@ -77,7 +102,7 @@ if __name__ == '__main__':
         print 'Extracting vocabulary'
         words, w2i, c2i, pos, rels, morphs = utils.vocab(options.conll_train)
         
-        with open(os.path.join(options.output, options.params), 'w') as paramsfp:
+        with open(os.path.join(options.outdir, options.params), 'w') as paramsfp:
             pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
         
         print 'Initializing joint model'
@@ -94,7 +119,7 @@ if __name__ == '__main__':
             parser.Train(options.conll_train)
             
             if options.conll_dev == "N/A":  
-                parser.Save(os.path.join(options.output, os.path.basename(options.model)))
+                parser.Save(os.path.join(options.outdir, os.path.basename(options.model)))
                 
             else: 
                 devPredSents = parser.Predict(options.conll_dev)
@@ -135,7 +160,7 @@ if __name__ == '__main__':
                 
                 score = float(poslasCount) * 100 / count
                 if score >= highestScore:
-                    parser.Save(os.path.join(options.output, os.path.basename(options.model)))
+                    parser.Save(os.path.join(options.outdir, os.path.basename(options.model)))
                     highestScore = score
                     eId = epoch + 1
                 
