@@ -20,7 +20,7 @@ class jPosDepLearner:
         self.blstmFlag = options.blstmFlag
         self.labelsFlag = options.labelsFlag
         self.costaugFlag = options.costaugFlag
-        self.bibiFlag = options.bibiFlag
+        self.rnn_type = options.rnn_type
 
         self.pos_ldims = options.pos_lstm_dims
         self.dep_ldims = options.dep_lstm_dims
@@ -62,12 +62,25 @@ class jPosDepLearner:
             self.extrnd['*INITIAL*'] = 2
 
             print 'Load external embedding. Vector dimensions', self.edim
-
-        if self.bibiFlag:
+       
+        if self.rnn_type == 'LSTM':
+            # self.pos_builder = [LSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model),
+            #                     LSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model)]
+            # self.dep_builders = [LSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model),
+            #                      LSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model)]
+            # self.char_rnn = RNNSequencePredictor(LSTMBuilder(1, self.cdims, self.cdims, self.model))        
             self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model),
                                 VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model)]
             self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model),
                                  VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model)]
+            self.char_rnn = RNNSequencePredictor(VanillaLSTMBuilder(1, self.cdims, self.cdims, self.model))        
+            
+        else:
+            self.pos_builder = [GRUBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model),
+                                GRUBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2, self.pos_ldims, self.model)]
+            self.dep_builders = [GRUBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model),
+                                 GRUBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims, self.dep_ldims, self.model)]
+            self.char_rnn = RNNSequencePredictor(GRUBuilder(1, self.cdims, self.cdims, self.model)) 
 
         self.ffSeqPredictor = FFSequencePredictor(Layer(self.model, self.pos_ldims * 2, len(self.pos), softmax))    
 
@@ -105,7 +118,6 @@ class jPosDepLearner:
             self.routLayer = self.model.add_parameters((len(self.irels), self.hidden2_units if self.hidden2_units > 0 else self.rel_hid))
             self.routBias = self.model.add_parameters((len(self.irels)))
         
-        self.char_rnn = RNNSequencePredictor(LSTMBuilder(1, self.cdims, self.cdims, self.model))
         self.charSeqPredictor = FFSequencePredictor(Layer(self.model, self.cdims*2, len(self.morphs), softmax))    
 
 
@@ -214,21 +226,20 @@ class jPosDepLearner:
                         else:
                             pos_embed.append(soft_embed(pred.value(), self.plookup))
                             
-                    if self.bibiFlag:
-                        for entry in conll_sentence:
-                            entry.vec = concatenate(entry.lstms)
-                        for builder in self.dep_builders:
-                            builder.disable_dropout()
-                        blstm_forward = self.dep_builders[0].initial_state()
-                        blstm_backward = self.dep_builders[1].initial_state()
+                    for entry in conll_sentence:
+                        entry.vec = concatenate(entry.lstms)
+                    for builder in self.dep_builders:
+                        builder.disable_dropout()
+                    blstm_forward = self.dep_builders[0].initial_state()
+                    blstm_backward = self.dep_builders[1].initial_state()
 
-                        for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
-                                                                    pos_embed, reversed(pos_embed)):
-                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
-                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
+                    for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
+                                                                pos_embed, reversed(pos_embed)):
+                        blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
+                        blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
 
-                            entry.lstms[1] = blstm_forward.output()
-                            rentry.lstms[0] = blstm_backward.output()
+                        entry.lstms[1] = blstm_forward.output()
+                        rentry.lstms[0] = blstm_backward.output()
 
                 scores, exprs = self.__evaluate(conll_sentence, True)
                 heads = decoder.parse_proj(scores)
@@ -355,21 +366,20 @@ class jPosDepLearner:
                     pos_eloss += pos_e
                     pos_mloss += pos_e
 
-                    if self.bibiFlag:
-                        for entry in conll_sentence:
-                            entry.vec = concatenate(entry.lstms)
-                        for builder in self.dep_builders:
-                            builder.set_dropout(self.dep_drop_rate)
-                        blstm_forward = self.dep_builders[0].initial_state()
-                        blstm_backward = self.dep_builders[1].initial_state()
+                    for entry in conll_sentence:
+                        entry.vec = concatenate(entry.lstms)
+                    for builder in self.dep_builders:
+                        builder.set_dropout(self.dep_drop_rate)
+                    blstm_forward = self.dep_builders[0].initial_state()
+                    blstm_backward = self.dep_builders[1].initial_state()
 
-                        for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
-                                                                    pos_embed, reversed(pos_embed)):
-                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
-                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
+                    for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
+                                                                pos_embed, reversed(pos_embed)):
+                        blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed]))
+                        blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed]))
 
-                            entry.lstms[1] = blstm_forward.output()
-                            rentry.lstms[0] = blstm_backward.output()
+                        entry.lstms[1] = blstm_forward.output()
+                        rentry.lstms[0] = blstm_backward.output()
 
                 scores, exprs = self.__evaluate(conll_sentence, True)
                 gold = [entry.parent_id for entry in conll_sentence]

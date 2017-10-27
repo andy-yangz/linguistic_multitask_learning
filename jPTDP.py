@@ -27,6 +27,7 @@ if __name__ == '__main__':
     # parser.add_option("--lr", type="float", dest="learning_rate", default=0.001)
     parser.add_option("--outdir", type="string", dest="output", default="results")
     parser.add_option("--activation", type="string", dest="activation", default="tanh")
+    parser.add_option("--rnn_type", type="string", dest="rnn_type", default="LSTM")
     parser.add_option("--lstmlayers", type="int", dest="lstm_layers", default=2)
     parser.add_option("--pos_lstm_dims", type="int", dest="pos_lstm_dims", default=128)
     parser.add_option("--dep_lstm_dims", type="int", dest="dep_lstm_dims", default=128)
@@ -34,7 +35,6 @@ if __name__ == '__main__':
     parser.add_option("--disableblstm", action="store_false", dest="blstmFlag", default=True)
     parser.add_option("--disablelabels", action="store_false", dest="labelsFlag", default=True)
     parser.add_option("--predict", action="store_true", dest="predictFlag", default=False)
-    parser.add_option("--bibi-lstm", action="store_false", dest="bibiFlag", default=True)
     parser.add_option("--disablecostaug", action="store_false", dest="costaugFlag", default=True)
     parser.add_option("--dynet-seed", type="int", dest="seed", default=123456789)
     parser.add_option("--dynet-mem", type="int", dest="mem", default=0)
@@ -74,6 +74,7 @@ if __name__ == '__main__':
             pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
         
         print 'Initializing joint model'
+        print 'RNN type: ' + options.rnn_type
         print 'POS layer: %d, POS LSTM dims: %d' % (options.pos_layer, options.pos_lstm_dims)
         print 'Dep layer: %d, Dep LSTM dims: %d' % (options.dep_layer, options.dep_lstm_dims)
         # print 'Learning Rate: %f' % (options.learning_rate)
