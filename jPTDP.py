@@ -66,8 +66,6 @@ if __name__ == '__main__':
         morphCount = 0
         poslasCount = 0
 
-        error_sent = defaultdict(dict)
-        error_flag = False
         for idSent, devSent in enumerate(devPredSents):
             conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
             sent = ' '.join([entry.form for entry in conll_devSent if entry.id > 0])
@@ -76,8 +74,6 @@ if __name__ == '__main__':
                     continue
                 if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
                     poslasCount += 1
-                else:
-                    error_flag = True
                 if entry.pos == entry.pred_pos:
                     posCount += 1
                 if entry.feats == entry.pred_feats:
@@ -87,17 +83,6 @@ if __name__ == '__main__':
                 if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
                     lasCount += 1
                 count += 1
-            if error_flag:
-                error_sent[sent]['POS'] = [entry.pos for entry in conll_devSent if entry.id > 0]
-                error_sent[sent]['pred_POS'] = [entry.pred_pos for entry in conll_devSent if entry.id > 0]
-                error_sent[sent]['dep_arc'] = [entry.parent_id for entry in conll_devSent if entry.id > 0]
-                error_sent[sent]['pred_dep_arc'] = [entry.pred_parent_id for entry in conll_devSent if entry.id > 0]
-                error_sent[sent]['dep_label'] = [entry.relation for entry in conll_devSent if entry.id > 0]
-                error_sent[sent]['pred_dep_label'] = [entry.pred_relation for entry in conll_devSent if entry.id > 0]
-                error_flag = False
-                
-        with open(os.path.join(options.outdir, 'error_ana', os.path.basename(options.model)), 'w') as errf:
-            pickle.dump(error_sent, errf)
        
         print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
         print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
