@@ -1,6 +1,7 @@
 # coding=utf-8
 from optparse import OptionParser
 import pickle, utils, learner, os, os.path, time
+from collections import defaultdict
 
 
 if __name__ == '__main__':
@@ -36,6 +37,7 @@ if __name__ == '__main__':
     parser.add_option("--disableblstm", action="store_false", dest="blstmFlag", default=True)
     parser.add_option("--disablelabels", action="store_false", dest="labelsFlag", default=True)
     parser.add_option("--predict", action="store_true", dest="predictFlag", default=False)
+    parser.add_option("--error_ana", action="store_true", dest="error_ana", default=False)
     parser.add_option("--disablecostaug", action="store_false", dest="costaugFlag", default=True)
     parser.add_option("--dynet-seed", type="int", dest="seed", default=123456789)
     parser.add_option("--dynet-mem", type="int", dest="mem", default=0)
@@ -49,6 +51,7 @@ if __name__ == '__main__':
             words, w2i, c2i, pos, rels, morphs, stored_opt = pickle.load(paramsfp)
             
         stored_opt.external_embedding = options.external_embedding
+        stored_opt.pretrain_wembed = options.pretrain_wembed
         
         print 'Loading pre-trained joint model'
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, stored_opt)
@@ -57,7 +60,7 @@ if __name__ == '__main__':
         tespath = os.path.join(options.outdir, 'test_pred.conll' if not conllu else 'test_pred.conllu')
         print 'Predicting POS tags and parsing dependencies'
         devPredSents = parser.Predict(options.conll_test)
-
+        
         count = 0
         uasCount = 0
         lasCount = 0

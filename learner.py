@@ -94,7 +94,9 @@ class jPosDepLearner:
 
         self.wlookup = self.model.add_lookup_parameters((len(vocab) + 3, self.wdims))
         # Load pretrained 
+
         if options.pretrain_wembed is not None:
+            print('Loading pretrained word embedding...')
             with open(options.pretrain_wembed, 'r') as emb_f:
                 next(emb_f)
                 for line in emb_f:
@@ -103,7 +105,7 @@ class jPosDepLearner:
             for word in self.pretrained_wembed.keys():
                 if word in self.vocab:
                     self.wlookup.init_row(self.vocab[word], self.pretrained_wembed[word])
-            
+
         self.clookup = self.model.add_lookup_parameters((len(c2i), self.cdims))
         self.mlookup = self.model.add_lookup_parameters((len(morphs), self.mdims))
         self.plookup = self.model.add_lookup_parameters((len(pos), self.pdims))
