@@ -20,7 +20,7 @@ class jPosDepLearner:
         self.blstmFlag = options.blstmFlag
         self.labelsFlag = options.labelsFlag
         self.costaugFlag = options.costaugFlag
-        self.bibiFlag = options.bibiFlag
+        self.rnn_type = options.rnn_type
 
         self.pos_ldims = options.pos_lstm_dims
         self.dep_ldims = options.dep_lstm_dims
@@ -69,10 +69,9 @@ class jPosDepLearner:
 
             print 'Load external embedding. Vector dimensions', self.edim
 
-        if self.bibiFlag:
-            self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.pos_ldims, self.model),
-                                VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.pos_ldims, self.model)]
-            self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims + self.mdims, self.dep_ldims, self.model),
+        self.pos_builder = [VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.pos_ldims, self.model),
+                            VanillaLSTMBuilder(self.pos_layer, self.wdims + self.edim + self.cdims * 2 + self.mdims, self.pos_ldims, self.model)]
+        self.dep_builders = [VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims + self.mdims, self.dep_ldims, self.model),
                                  VanillaLSTMBuilder(self.dep_layer, self.pos_ldims * 2 + self.pdims + self.mdims, self.dep_ldims, self.model)]
 
         self.ffSeqPredictor = FFSequencePredictor(Layer(self.model, self.pos_ldims * 2, len(self.pos), softmax))    
@@ -88,6 +87,19 @@ class jPosDepLearner:
         self.wlookup = self.model.add_lookup_parameters((len(vocab) + 3, self.wdims))
         self.mclookup = self.model.add_lookup_parameters((len(c2i), self.cdims))
         self.pclookup = self.model.add_lookup_parameters((len(c2i), self.cdims))
+        # Load pretrained 
+
+        if options.pretrain_wembed is not None:
+            print('Loading pretrained word embedding...')
+            with open(options.pretrain_wembed, 'r') as emb_f:
+                next(emb_f)
+                for line in emb_f:
+                    self.pretrained_wembed = {line.split(' ')[0] : [float(f) for f in line.strip().split(' ')[1:]] for line in emb_f}
+
+            for word in self.pretrained_wembed.keys():
+                if word in self.vocab:
+                    self.wlookup.init_row(self.vocab[word], self.pretrained_wembed[word])
+
         self.mlookup = self.model.add_lookup_parameters((len(morphs), self.mdims))
         self.plookup = self.model.add_lookup_parameters((len(pos), self.pdims))
 
@@ -243,21 +255,20 @@ class jPosDepLearner:
                         else:
                             pos_embed.append(self.plookup[predID])      
                     
-                    if self.bibiFlag:
-                        for entry in conll_sentence:
-                            entry.vec = concatenate(entry.lstms)
-                        for builder in self.dep_builders:
-                            builder.disable_dropout()
-                        blstm_forward = self.dep_builders[0].initial_state()
-                        blstm_backward = self.dep_builders[1].initial_state()
+                    for entry in conll_sentence:
+                        entry.vec = concatenate(entry.lstms)
+                    for builder in self.dep_builders:
+                        builder.disable_dropout()
+                    blstm_forward = self.dep_builders[0].initial_state()
+                    blstm_backward = self.dep_builders[1].initial_state()
 
-                        for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
-                                                                    pos_embed, reversed(pos_embed)):
-                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed, entry.morph_vec]))
-                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed, rentry.morph_vec]))
+                    for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
+                                                                pos_embed, reversed(pos_embed)):
+                        blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed, entry.morph_vec]))
+                        blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed, rentry.morph_vec]))
 
-                            entry.lstms[1] = blstm_forward.output()
-                            rentry.lstms[0] = blstm_backward.output()
+                        entry.lstms[1] = blstm_forward.output()
+                        rentry.lstms[0] = blstm_backward.output()
 
                 scores, exprs = self.__evaluate(conll_sentence, True)
                 heads = decoder.parse_proj(scores)
@@ -418,22 +429,21 @@ class jPosDepLearner:
                     pos_eloss += pos_e
                     pos_mloss += pos_e
 
-                    if self.bibiFlag:
-                        for entry in conll_sentence:
-                            entry.vec = concatenate(entry.lstms)
-                        for builder in self.dep_builders:
-                            builder.set_dropout(self.dep_drop_rate)
+                    for entry in conll_sentence:
+                        entry.vec = concatenate(entry.lstms)
+                    for builder in self.dep_builders:
+                        builder.set_dropout(self.dep_drop_rate)
 
-                        blstm_forward = self.dep_builders[0].initial_state()
-                        blstm_backward = self.dep_builders[1].initial_state()
+                    blstm_forward = self.dep_builders[0].initial_state()
+                    blstm_backward = self.dep_builders[1].initial_state()
 
-                        for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
-                                                                    pos_embed, reversed(pos_embed)):
-                            blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed, entry.morph_vec]))
-                            blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed, rentry.morph_vec]))
+                    for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
+                                                                pos_embed, reversed(pos_embed)):
+                        blstm_forward = blstm_forward.add_input(concatenate([entry.vec, pembed, entry.morph_vec]))
+                        blstm_backward = blstm_backward.add_input(concatenate([rentry.vec, revpembed, rentry.morph_vec]))
 
-                            entry.lstms[1] = blstm_forward.output()
-                            rentry.lstms[0] = blstm_backward.output()
+                        entry.lstms[1] = blstm_forward.output()
+                        rentry.lstms[0] = blstm_backward.output()
 
                         # for entry, rentry, pembed, revpembed in zip(conll_sentence, reversed(conll_sentence),
                         #                                             pos_embed, reversed(pos_embed)):

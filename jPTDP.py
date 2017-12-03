@@ -1,6 +1,7 @@
 # coding=utf-8
 from optparse import OptionParser
 import pickle, utils, learner, os, os.path, time
+from collections import defaultdict
 
 
 if __name__ == '__main__':
@@ -10,9 +11,10 @@ if __name__ == '__main__':
     parser.add_option("--test", dest="conll_test", help="Path to CONLL test file", metavar="FILE", default="N/A")
     parser.add_option("--output", dest="conll_test_output", help="File name for predicted output", metavar="FILE", default="N/A")
     parser.add_option("--extrn", dest="external_embedding", help="External embeddings", metavar="FILE")
+    parser.add_option("--pre_wembed", dest="pretrain_wembed", help="Pretrained Word embeddings", metavar="FILE")    
     parser.add_option("--params", dest="params", help="Parameters file", metavar="FILE", default="model.params")
     parser.add_option("--model", dest="model", help="Load/Save model file", metavar="FILE", default="model")
-    parser.add_option("--wembedding", type="int", dest="wembedding_dims", default=128)
+    parser.add_option("--wembedding", type="int", dest="wembedding_dims", default=100)
     parser.add_option("--cembedding", type="int", dest="cembedding_dims", default=64)
     parser.add_option("--membedding", type="int", dest="membedding_dims", default=64)
     parser.add_option("--pembedding", type="int", dest="pembedding_dims", default=64)
@@ -30,6 +32,7 @@ if __name__ == '__main__':
     # parser.add_option("--lr", type="float", dest="learning_rate", default=0.001)
     parser.add_option("--outdir", type="string", dest="outdir", default="results")
     parser.add_option("--activation", type="string", dest="activation", default="tanh")
+    parser.add_option("--rnn_type", type="string", dest="rnn_type", default="LSTM")
     parser.add_option("--lstmlayers", type="int", dest="lstm_layers", default=2)
     parser.add_option("--pos_lstm_dims", type="int", dest="pos_lstm_dims", default=128)
     parser.add_option("--dep_lstm_dims", type="int", dest="dep_lstm_dims", default=128)
@@ -41,7 +44,7 @@ if __name__ == '__main__':
     parser.add_option("--disableblstm", action="store_false", dest="blstmFlag", default=True)
     parser.add_option("--disablelabels", action="store_false", dest="labelsFlag", default=True)
     parser.add_option("--predict", action="store_true", dest="predictFlag", default=False)
-    parser.add_option("--bibi-lstm", action="store_false", dest="bibiFlag", default=True)
+    parser.add_option("--error_ana", action="store_true", dest="error_ana", default=False)
     parser.add_option("--disablecostaug", action="store_false", dest="costaugFlag", default=True)
     parser.add_option("--dynet-seed", type="int", dest="seed", default=123456789)
     parser.add_option("--dynet-mem", type="int", dest="mem", default=0)
@@ -55,6 +58,7 @@ if __name__ == '__main__':
             words, w2i, c2i, pos, rels, morphs, stored_opt = pickle.load(paramsfp)
             
         stored_opt.external_embedding = options.external_embedding
+        stored_opt.pretrain_wembed = options.pretrain_wembed
         
         print 'Loading pre-trained joint model'
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, stored_opt)
@@ -63,16 +67,16 @@ if __name__ == '__main__':
         tespath = os.path.join(options.outdir, 'test_pred.conll' if not conllu else 'test_pred.conllu')
         print 'Predicting POS tags and parsing dependencies'
         devPredSents = parser.Predict(options.conll_test)
-
+        
         count = 0
         uasCount = 0
         lasCount = 0
         posCount = 0
         morphCount = 0
         poslasCount = 0
-
         for idSent, devSent in enumerate(devPredSents):
             conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
+            
             for entry in conll_devSent:
                 if entry.id <= 0:
                     continue
@@ -86,17 +90,23 @@ if __name__ == '__main__':
                     uasCount += 1
                 if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
                     lasCount += 1
-                count += 1             
+                count += 1
+                
         print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
         print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
         print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
         print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
         print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
 
-        #conllu = (os.path.splitext(options.conll_test.lower())[1] == '.conllu')
-        #if not conllu:#Scored with punctuation
+        # ts = time.time()
+        # test_res = list(devPredSents)
+        # te = time.time()
+        # print 'Finished in', te-ts, 'seconds.'
+        # utils.write_conll(tespath, test_res)
+
+        # if not conllu:#Scored with punctuation
         #    os.system('perl utils/eval07.pl -q -g ' + options.conll_test + ' -s ' + tespath  + ' > ' + tespath + '.scores.txt')
-        #else:
+        # else:
         #    os.system('python utils/evaluation_script/conll17_ud_eval.py -v -w utils/evaluation_script/weights.clas ' + options.conll_test + ' ' + tespath + ' > ' + tespath + '.scores.txt')
     else:
         print 'Extracting vocabulary'
@@ -107,8 +117,9 @@ if __name__ == '__main__':
         
         print 'Initializing joint model'
         print 'Morph Layer: %d, Morph LSTM dims: %d' % (options.morph_layer, options.morph_lstm_dims)
-        print 'POS layer: %d, LSTM dims: %d, dropout: %f' % (options.pos_layer, options.pos_lstm_dims, options.pos_dropout)
-        print 'Dep layer: %d, LSTM dims: %d, dropout: %f' % (options.dep_layer, options.dep_lstm_dims, options.dep_dropout)
+        print 'RNN type: ' + options.rnn_type
+        print 'POS layer: %d, POS LSTM dims: %d' % (options.pos_layer, options.pos_lstm_dims)
+        print 'Dep layer: %d, Dep LSTM dims: %d' % (options.dep_layer, options.dep_lstm_dims)
         # print 'Learning Rate: %f' % (options.learning_rate)
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, options)
         
