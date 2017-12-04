@@ -2,6 +2,8 @@
 from optparse import OptionParser
 import pickle, utils, learner, os, os.path, time
 from collections import defaultdict
+import os.path
+from random import randint
 
 
 if __name__ == '__main__':
@@ -9,6 +11,7 @@ if __name__ == '__main__':
     parser.add_option("--train", dest="conll_train", help="Path to annotated CONLL train file", metavar="FILE", default="N/A")
     parser.add_option("--dev", dest="conll_dev", help="Path to annotated CONLL dev file", metavar="FILE", default="N/A")
     parser.add_option("--test", dest="conll_test", help="Path to CONLL test file", metavar="FILE", default="N/A")
+    parser.add_option("--gold", dest="conll_gold", help="Path to CONLL test gold file", metavar="FILE", default="N/A")
     parser.add_option("--output", dest="conll_test_output", help="File name for predicted output", metavar="FILE", default="N/A")
     parser.add_option("--extrn", dest="external_embedding", help="External embeddings", metavar="FILE")
     parser.add_option("--pre_wembed", dest="pretrain_wembed", help="Pretrained Word embeddings", metavar="FILE")    
@@ -19,7 +22,7 @@ if __name__ == '__main__':
     parser.add_option("--membedding", type="int", dest="membedding_dims", default=64)
     parser.add_option("--pembedding", type="int", dest="pembedding_dims", default=32)
     parser.add_option("--pos_layer", type="int", dest="pos_layer", default=1)
-    parser.add_option("--dep_layer", type="int", dest="dep_layer", default=1)
+    parser.add_option("--dep_layer", type="int", dest="dep_layer", default=2)
     parser.add_option("--pos_dropout", type="float", dest="pos_dropout", default=0.2)
     parser.add_option("--dep_dropout", type="float", dest="dep_dropout", default=0.2)
     parser.add_option("--epochs", type="int", dest="epochs", default=30)
@@ -39,8 +42,10 @@ if __name__ == '__main__':
     parser.add_option("--predict", action="store_true", dest="predictFlag", default=False)
     parser.add_option("--error_ana", action="store_true", dest="error_ana", default=False)
     parser.add_option("--disablecostaug", action="store_false", dest="costaugFlag", default=True)
-    parser.add_option("--dynet-seed", type="int", dest="seed", default=123456789)
+    parser.add_option("--dynet-seed", type="int", dest="seed", default=randint(0, 1e8))
     parser.add_option("--dynet-mem", type="int", dest="mem", default=0)
+    parser.add_option("--exp_times", type="int", dest='exp_times', default=0)
+    parser.add_option("--log", dest="log_path", help="Path to log file", metavar="FILE", default="./log")
 
     (options, args) = parser.parse_args()
 
@@ -57,57 +62,73 @@ if __name__ == '__main__':
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, stored_opt)
         parser.Load(os.path.join(options.outdir, os.path.basename(options.model)))
         conllu = (os.path.splitext(options.conll_test.lower())[1] == '.conllu')
-        tespath = os.path.join(options.outdir, 'test_pred.conll' if not conllu else 'test_pred.conllu')
+        tespath = os.path.join(options.outdir, stored_opt.model + 'test_pred.conllu')
         print 'Predicting POS tags and parsing dependencies'
         devPredSents = parser.Predict(options.conll_test)
         
-        count = 0
-        uasCount = 0
-        lasCount = 0
-        posCount = 0
-        morphCount = 0
-        poslasCount = 0
-        for idSent, devSent in enumerate(devPredSents):
-            conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
+        # count = 0
+        # uasCount = 0
+        # lasCount = 0
+        # posCount = 0
+        # morphCount = 0
+        # poslasCount = 0
+        # for idSent, devSent in enumerate(devPredSents):
+        #     conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
             
-            for entry in conll_devSent:
-                if entry.id <= 0:
-                    continue
-                if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
-                    poslasCount += 1
-                if entry.pos == entry.pred_pos:
-                    posCount += 1
-                if entry.feats == entry.pred_feats:
-                    morphCount += 1
-                if entry.parent_id == entry.pred_parent_id:
-                    uasCount += 1
-                if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
-                    lasCount += 1
-                count += 1
+        #     for entry in conll_devSent:
+        #         if entry.id <= 0:
+        #             continue
+        #         if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
+        #             poslasCount += 1
+        #         if entry.pos == entry.pred_pos:
+        #             posCount += 1
+        #         if entry.feats == entry.pred_feats:
+        #             morphCount += 1
+        #         if entry.parent_id == entry.pred_parent_id:
+        #             uasCount += 1
+        #         if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
+        #             lasCount += 1
+        #         count += 1
                 
-        print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
-        print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
-        print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
-        print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
-        print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
+        # LAS = float(lasCount) * 100 / count
+        # UAS = float(uasCount) * 100 / count
+        # POS = float(posCount) * 100 / count
+        # Morph = float(morphCount) * 100 / count
+        # POSLAS = float(poslasCount) * 100 / count
 
-        # ts = time.time()
-        # test_res = list(devPredSents)
-        # te = time.time()
-        # print 'Finished in', te-ts, 'seconds.'
-        # utils.write_conll(tespath, test_res)
+        # print "---\nLAS accuracy:\t%.2f" % LAS
+        # print "UAS accuracy:\t%.2f" % UAS
+        # print "POS accuracy:\t%.2f" % POS
+        # print "Morph accuracy:\t%.2f" % Morph
+        # print "POS&LAS:\t%.2f" % POSLAS
 
-        # if not conllu:#Scored with punctuation
-        #    os.system('perl utils/eval07.pl -q -g ' + options.conll_test + ' -s ' + tespath  + ' > ' + tespath + '.scores.txt')
-        # else:
-        #    os.system('python utils/evaluation_script/conll17_ud_eval.py -v -w utils/evaluation_script/weights.clas ' + options.conll_test + ' ' + tespath + ' > ' + tespath + '.scores.txt')
+        # with open(os.path.join(options.log_path, os.path.basename(options.model)+'.log.test'), 'a') as log_f:
+        #     log_f.write('%d times of experiments.\n' % options.exp_times)
+        #     log_f.write('LAS\tUAS\tPOS\tMorph\tPOS&LAS\n')
+        #     log_f.write('%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n'%(LAS, UAS, POS, Morph, POSLAS))
+
+        ts = time.time()
+        test_res = list(devPredSents)
+        te = time.time()
+        print 'Finished in', te-ts, 'seconds.'
+        utils.write_conll(tespath, test_res)
+
+        if not conllu:#Scored with punctuation
+           os.system('perl utils/eval07.pl -q -g ' + options.conll_test + ' -s ' + tespath  + ' > ' + tespath + '.scores.txt')
+        else:
+           os.system('python utils/evaluation_script/conll17_ud_eval.py -v -w utils/evaluation_script/weights.clas ' + options.conll_gold + ' ' + tespath + ' > ' + tespath + '.scores.txt')
     else:
-        print 'Extracting vocabulary'
-        words, w2i, c2i, pos, rels, morphs = utils.vocab(options.conll_train)
-        
-        with open(os.path.join(options.outdir, options.params), 'w') as paramsfp:
-            pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
-        
+        if os.path.isfile(os.path.join(options.outdir, options.params)):
+            print("Load existed vocabulary.")
+            with open(os.path.join(options.outdir, options.params), 'r') as paramsfp:
+                words, w2i, c2i, pos, rels, morphs, stored_opt = pickle.load(paramsfp)
+        else:
+            print 'Extracting vocabulary'
+            words, w2i, c2i, pos, rels, morphs = utils.vocab(options.conll_train)
+            
+            with open(os.path.join(options.outdir, options.params), 'w') as paramsfp:
+                pickle.dump((words, w2i, c2i, pos, rels, morphs, options), paramsfp)
+
         print 'Initializing joint model'
         print 'RNN type: ' + options.rnn_type
         print 'POS layer: %d, POS LSTM dims: %d' % (options.pos_layer, options.pos_lstm_dims)
@@ -117,6 +138,7 @@ if __name__ == '__main__':
         
         highestScore = 0.0
         eId = 0
+        
         for epoch in xrange(options.epochs):
             print '\n-----------------\nStarting epoch', epoch + 1
             parser.Train(options.conll_train)
@@ -151,16 +173,27 @@ if __name__ == '__main__':
                             lasCount += 1
                         count += 1
                         
-                print "---\nLAS accuracy:\t%.2f" % (float(lasCount) * 100 / count)
-                print "UAS accuracy:\t%.2f" % (float(uasCount) * 100 / count)
-                print "POS accuracy:\t%.2f" % (float(posCount) * 100 / count)
-                print "Morph accuracy:\t%.2f" % (float(morphCount) * 100 / count)
-                print "POS&LAS:\t%.2f" % (float(poslasCount) * 100 / count)
+                LAS = float(lasCount) * 100 / count
+                UAS = float(uasCount) * 100 / count
+                POS = float(posCount) * 100 / count
+                Morph = float(morphCount) * 100 / count
+                POSLAS = float(poslasCount) * 100 / count
+
+                print "---\nLAS accuracy:\t%.2f" % LAS
+                print "UAS accuracy:\t%.2f" % UAS
+                print "POS accuracy:\t%.2f" % POS
+                print "Morph accuracy:\t%.2f" % Morph
+                print "POS&LAS:\t%.2f" % POSLAS
                 
                 score = float(poslasCount) * 100 / count
                 if score >= highestScore:
                     parser.Save(os.path.join(options.outdir, os.path.basename(options.model)))
                     highestScore = score
                     eId = epoch + 1
-                
-                print "Highest POS&LAS: %.2f at epoch %d" % (highestScore, eId)
+                    
+        print "Highest POS&LAS: %.2f at epoch %d" % (highestScore, eId)
+        with open(os.path.join(options.log_path, os.path.basename(options.model)+'.log.dev'), 'a') as log_f:
+            log_f.write('%d times of experiments.\n' % options.exp_times)
+            log_f.write('LAS\tUAS\tPOS\tMorph\tPOS&LAS\tEpoch\n')
+            log_f.write('%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%d\n'%(LAS, UAS, POS, Morph, POSLAS, eId))
+            
