@@ -66,49 +66,6 @@ if __name__ == '__main__':
         print 'Predicting POS tags and parsing dependencies'
         devPredSents = parser.Predict(options.conll_test)
         
-        # count = 0
-        # uasCount = 0
-        # lasCount = 0
-        # posCount = 0
-        # morphCount = 0
-        # poslasCount = 0
-        # for idSent, devSent in enumerate(devPredSents):
-        #     conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
-            
-        #     for entry in conll_devSent:
-        #         if entry.id <= 0:
-        #             continue
-        #         if entry.pos == entry.pred_pos and entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
-        #             poslasCount += 1
-        #         if entry.pos == entry.pred_pos:
-        #             posCount += 1
-        #         if entry.feats == entry.pred_feats:
-        #             morphCount += 1
-        #         if entry.parent_id == entry.pred_parent_id:
-        #             uasCount += 1
-        #         if entry.parent_id == entry.pred_parent_id and entry.pred_relation == entry.relation:
-        #             lasCount += 1
-        #         count += 1
-                
-        # LAS = float(lasCount) * 100 / count
-        # UAS = float(uasCount) * 100 / count
-        # POS = float(posCount) * 100 / count
-        # Morph = float(morphCount) * 100 / count
-        # POSLAS = float(poslasCount) * 100 / count
-
-        # print "---\nLAS accuracy:\t%.2f" % LAS
-        # print "UAS accuracy:\t%.2f" % UAS
-        # print "POS accuracy:\t%.2f" % POS
-        # print "Morph accuracy:\t%.2f" % Morph
-        # print "POS&LAS:\t%.2f" % POSLAS
-
-        # with open(os.path.join(options.log_path, os.path.basename(options.model)+'.log.test'), 'a') as log_f:
-        #     log_f.write('%d times of experiments.\n' % options.exp_times)
-        #     log_f.write('LAS\tUAS\tPOS\tMorph\tPOS&LAS\n')
-        #     log_f.write('%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n'%(LAS, UAS, POS, Morph, POSLAS))
-
-        ts = time.time()
-        test_res = list(devPredSents)
         te = time.time()
         print 'Finished in', te-ts, 'seconds.'
         utils.write_conll(tespath, test_res)
@@ -133,7 +90,6 @@ if __name__ == '__main__':
         print 'RNN type: ' + options.rnn_type
         print 'POS layer: %d, POS LSTM dims: %d' % (options.pos_layer, options.pos_lstm_dims)
         print 'Dep layer: %d, Dep LSTM dims: %d' % (options.dep_layer, options.dep_lstm_dims)
-        # print 'Learning Rate: %f' % (options.learning_rate)
         parser = learner.jPosDepLearner(words, pos, rels, morphs, w2i, c2i, options)
         
         highestScore = 0.0
