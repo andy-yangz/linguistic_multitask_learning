@@ -57,7 +57,7 @@ The main hyper-parameters as follow:
 
 * `--model`: Specify path to model parameters file.
 * `--params`: Specify path to model hyper-parameters file.
-* `predict`: Specify the test mode.
+* `--predict`: Specify the test mode.
 * `--test`: Specify path to test file.
 * `--outdir`: Specify path to directory where output file will be saved.
 * `--output`: Specify name of the  output file.
